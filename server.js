@@ -39,7 +39,7 @@ binanceWs.on('message', (data) => {
             }
 
             // 🐋 Balina Duvarı Eklendi
-            if (val >= 500) {
+            if (val >= 50000) {
                 if (!walls.has(price)) {
                     const id = wallIdCounter++;
                     walls.set(price, { id, initialVal: val, currentVal: val, isSpoofed: false });
@@ -64,7 +64,7 @@ binanceWs.on('message', (data) => {
             }
         });
 
-        if (maxMagnetVal > 2000 && Math.random() < 0.1) {
+        if (maxMagnetVal > 2000000 && Math.random() < 0.1) {
             broadcast({ type: 'MAGNET', price: magnetPrice, pool: maxMagnetVal });
         }
     } 
