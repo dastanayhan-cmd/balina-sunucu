@@ -9,7 +9,7 @@ console.log("🚀 Algoritmik Terminal Başlatıldı. Binance dinleniyor...");
 const walls = new Map(); 
 let wallIdCounter = 1;
 
-// Binance'a TEK bağlantı üzerinden ÇİFT kanal açıyoruz (Emir Defteri + Anlık İşlemler)
+// Binance'a TEK bağlantı üzerinden ÇİFT kanal açıyoruz
 const binanceWs = new WebSocket('wss://stream.binance.com:9443/stream?streams=btcusdt@depth@100ms/btcusdt@aggTrade');
 
 binanceWs.on('message', (data) => {
@@ -21,7 +21,7 @@ binanceWs.on('message', (data) => {
 
     // KANAL 1: EMİR DEFTERİ (Duvar Tespit & Spoofing)
     if (stream === 'btcusdt@depth@100ms') {
-        const bids = streamData.b; // Alım Emirleri
+        const bids = streamData.b;
         if (!bids) return;
 
         let maxMagnetVal = 0;
@@ -32,13 +32,13 @@ binanceWs.on('message', (data) => {
             const qty = parseFloat(bid[1]);
             const val = price * qty;
 
-            // 🧲 Mıknatıs (Magnet) Tespiti
+            // 🧲 Mıknatıs Tespiti
             if (val > maxMagnetVal) {
                 maxMagnetVal = val;
                 magnetPrice = price;
             }
 
-            // 🐋 Balina Duvarı Eklendi (500k$ Üzeri)
+            // 🐋 Balina Duvarı Eklendi
             if (val >= 500000) {
                 if (!walls.has(price)) {
                     const id = wallIdCounter++;
@@ -105,5 +105,3 @@ function broadcast(msg) {
         }
     });
 }
-    }
-});
