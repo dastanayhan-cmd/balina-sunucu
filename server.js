@@ -39,7 +39,7 @@ binanceWs.on('message', (data) => {
             }
 
             // 🐋 Balina Duvarı Eklendi
-            if (val >= 50000) {
+            if (val >= 500000) {
                 if (!walls.has(price)) {
                     const id = wallIdCounter++;
                     walls.set(price, { id, initialVal: val, currentVal: val, isSpoofed: false });
