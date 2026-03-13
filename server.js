@@ -1,16 +1,14 @@
 const WebSocket = require('ws');
-
-// Senin frontend sitenle konuşacak olan sunucu
 const wss = new WebSocket.Server({ port: process.env.PORT || 8080 });
 
-console.log("🚀 Algoritmik Terminal Başlatıldı. Binance dinleniyor...");
+console.log("🚀 Multi-Coin Terminal Başlatıldı. BTC, ETH, SOL dinleniyor...");
 
-// Hafıza: Aktif balina duvarlarını burada tutacağız
-const walls = new Map(); 
+const walls = new Map();
 let wallIdCounter = 1;
 
-// Binance'a TEK bağlantı üzerinden ÇİFT kanal açıyoruz
-const binanceWs = new WebSocket('wss://stream.binance.com:9443/stream?streams=btcusdt@depth@100ms/btcusdt@aggTrade');
+// Binance'a TEK bağlantı üzerinden 6 kanal (3 Coin x 2 Veri) açıyoruz
+const streams = 'btcusdt@depth@100ms/btcusdt@aggTrade/ethusdt@depth@100ms/ethusdt@aggTrade/solusdt@depth@100ms/solusdt@aggTrade';
+const binanceWs = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
 
 binanceWs.on('message', (data) => {
     const payload = JSON.parse(data);
@@ -18,79 +16,66 @@ binanceWs.on('message', (data) => {
 
     const stream = payload.stream;
     const streamData = payload.data;
+    const coin = stream.split('usdt')[0].toUpperCase(); // 'btcusdt...' -> 'BTC'
 
-    // KANAL 1: EMİR DEFTERİ (Duvar Tespit & Spoofing)
-    if (stream === 'btcusdt@depth@100ms') {
+    if (stream.includes('@depth')) {
         const bids = streamData.b;
         if (!bids) return;
 
-        let maxMagnetVal = 0;
-        let magnetPrice = 0;
+        let maxMagnetVal = 0, magnetPrice = 0;
 
         bids.forEach(bid => {
             const price = parseFloat(bid[0]);
-            const qty = parseFloat(bid[1]);
-            const val = price * qty;
+            const val = price * parseFloat(bid[1]);
 
-            // 🧲 Mıknatıs Tespiti
-            if (val > maxMagnetVal) {
-                maxMagnetVal = val;
-                magnetPrice = price;
-            }
+            if (val > maxMagnetVal) { maxMagnetVal = val; magnetPrice = price; }
 
-            // 🐋 Balina Duvarı Eklendi
-            if (val >= 500000) {
-                if (!walls.has(price)) {
+            // Coinlere Özel Balina Barajları (Hacim farkından dolayı)
+            let wallThreshold = coin === 'BTC' ? 500000 : (coin === 'ETH' ? 250000 : 100000);
+            const wallKey = `${coin}-${price}`;
+
+            if (val >= wallThreshold) {
+                if (!walls.has(wallKey)) {
                     const id = wallIdCounter++;
-                    walls.set(price, { id, initialVal: val, currentVal: val, isSpoofed: false });
-                    broadcast({ type: 'NEW_WALL', id, price, val, coin: 'BTC' });
+                    walls.set(wallKey, { id, initialVal: val, currentVal: val, isSpoofed: false, coin });
+                    broadcast({ type: 'NEW_WALL', id, price, val, coin });
                 } else {
-                    const wall = walls.get(price);
+                    const wall = walls.get(wallKey);
                     if (!wall.isSpoofed && val > wall.initialVal) {
-                        wall.initialVal = val;
-                        wall.currentVal = val;
+                        wall.initialVal = wall.currentVal = val;
                         broadcast({ type: 'ARMOR', id: wall.id, health: 100 }); 
                     }
                 }
             } 
-            // 👻 Spoof (Sahte Emir) Tespiti
-            else if (val < 100000 && walls.has(price)) {
-                const wall = walls.get(price);
+            else if (val < (wallThreshold / 5) && walls.has(wallKey)) {
+                const wall = walls.get(wallKey);
                 if (!wall.isSpoofed && (wall.currentVal / wall.initialVal) > 0.5) {
                     wall.isSpoofed = true;
                     broadcast({ type: 'SPOOFED', id: wall.id });
-                    setTimeout(() => walls.delete(price), 15000); 
+                    setTimeout(() => walls.delete(wallKey), 15000); 
                 }
             }
         });
 
-        if (maxMagnetVal > 2000000 && Math.random() < 0.1) {
-            broadcast({ type: 'MAGNET', price: magnetPrice, pool: maxMagnetVal });
+        let magThreshold = coin === 'BTC' ? 2000000 : (coin === 'ETH' ? 1000000 : 300000);
+        if (maxMagnetVal > magThreshold && Math.random() < 0.1) {
+            broadcast({ type: 'MAGNET', price: magnetPrice, pool: maxMagnetVal, coin });
         }
     } 
-    
-    // KANAL 2: GERÇEKLEŞEN İŞLEMLER (Kıyma Makinesi / Zırh Erimesi)
-    else if (stream === 'btcusdt@aggTrade') {
-        const isSell = streamData.m; 
-        
-        if (isSell) {
+    else if (stream.includes('@aggTrade')) {
+        if (streamData.m) {
             const price = parseFloat(streamData.p);
-            const qty = parseFloat(streamData.q);
-            const tradeVal = price * qty;
+            const tradeVal = price * parseFloat(streamData.q);
+            const wallKey = `${coin}-${price}`;
 
-            if (walls.has(price)) {
-                const wall = walls.get(price);
+            if (walls.has(wallKey)) {
+                const wall = walls.get(wallKey);
                 if (!wall.isSpoofed) {
                     wall.currentVal -= tradeVal; 
-                    
                     let health = (wall.currentVal / wall.initialVal) * 100;
                     if (health < 0) health = 0;
-                    
                     broadcast({ type: 'ARMOR', id: wall.id, health });
-
-                    if (health <= 2) {
-                        walls.delete(price);
-                    }
+                    if (health <= 2) walls.delete(wallKey);
                 }
             }
         }
@@ -100,8 +85,6 @@ binanceWs.on('message', (data) => {
 function broadcast(msg) {
     const str = JSON.stringify(msg);
     wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(str);
-        }
+        if (client.readyState === WebSocket.OPEN) client.send(str);
     });
-}
+                     }
